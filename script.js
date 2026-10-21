@@ -343,14 +343,57 @@
     });
   }
 
-  /* Formulaire de démonstration : validation locale, sans envoi ni stockage des champs. */
+  /* Form.taxi : confirmation sur place pour le site HTTP(S).
+     Depuis un fichier local ou sans JavaScript, le POST HTML conserve le parcours natif
+     du service (y compris sa confirmation en français). Aucun destinataire dans le code. */
   const form = root.querySelector('#contact-form');
-  form?.addEventListener('submit', event => {
-    event.preventDefault();
+  if (form && /^https?:$/.test(window.location.protocol) && window.fetch && window.AbortController) {
     const status = root.querySelector('#form-status');
-    status.hidden = false;
-    status.textContent = 'La démonstration fonctionne. Aucun message n’a été envoyé et aucune donnée n’a été enregistrée.';
-  });
-  /* Le bouton reste inactif tant que la protection contre l'envoi n'est pas installée. */
-  if (form) form.querySelector('button[type="submit"]').disabled = false;
+    const button = form.querySelector('button[type="submit"]');
+    let sending = false;
+    const showStatus = (message, state) => {
+      status.hidden = false;
+      status.dataset.state = state;
+      status.textContent = message;
+    };
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (sending || !form.reportValidity()) return;
+      const data = new FormData(form);
+      sending = true;
+      button.disabled = true;
+      button.textContent = 'Envoi en cours…';
+      form.setAttribute('aria-busy', 'true');
+      // Empêche la modification d'un texte qui serait effacé au retour du service.
+      const fields = [...form.querySelectorAll('input, textarea')].filter(field => !field.disabled);
+      fields.forEach(field => {field.disabled = true;});
+      showStatus('Votre message est en cours de transmission.', 'pending');
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 20000);
+      try {
+        const response = await fetch(form.action, {
+          method:'POST', body:data, headers:{Accept:'application/json'},
+          credentials:'omit', signal:controller.signal
+        });
+        const result = await response.json();
+        if (response.status === 200 && result?.success === true) {
+          form.reset();
+          showStatus('Merci, votre message a bien été transmis. Je reviendrai vers vous pour échanger sur votre demande.', 'success');
+        } else {
+          showStatus('Le service n’a pas confirmé l’envoi. Votre texte est conservé. Vous pouvez réessayer plus tard ou me joindre au 06 13 97 10 14.', 'error');
+        }
+      } catch {
+        // Pas de nouvel envoi automatique : le premier pourrait déjà avoir été reçu.
+        showStatus('La confirmation d’envoi n’a pas pu être reçue. Votre message a peut-être été transmis et votre texte est conservé. Pour éviter un doublon, vous pouvez me joindre au 06 13 97 10 14.', 'error');
+      } finally {
+        clearTimeout(timeout);
+        sending = false;
+        fields.forEach(field => {field.disabled = false;});
+        button.disabled = false;
+        button.textContent = 'Envoyer mon message';
+        form.removeAttribute('aria-busy');
+        status.focus({preventScroll:true});
+      }
+    });
+  }
 })();
